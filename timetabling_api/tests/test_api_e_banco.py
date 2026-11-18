@@ -132,3 +132,41 @@ class TestApiRestTimetabling(APITestCase):
         self.assertEqual(resp.data["status"], StatusExecucao.FALHA)
         self.assertEqual(len(resp.data["diagnosticos"]), 1)
         self.assertEqual(len(resp.data["aulas_agendadas"]), 0)
+
+    def test_geracao_via_payload_frontend(self) -> None:
+        payload = {
+            "solicitado_por": {"email": "coord@escola.com", "role": "COORDENADOR"},
+            "accounts": [
+                {"id": "p1", "name": "Prof. Ana", "email": "ana@escola.com", "role": "PROFESSOR"},
+            ],
+            "slots": [
+                {"id": "s1", "dia": "Segunda-feira", "turno": "Manhã", "inicio": "07:10", "duracao": "50"},
+                {"id": "s2", "dia": "Terça-feira", "turno": "Manhã", "inicio": "07:10", "duracao": "50"},
+            ],
+            "academic": [
+                {"id": "c1", "tipo": "Curso", "nome": "Ensino Médio", "detalhes": "Regular"},
+                {"id": "t1", "tipo": "Turma", "nome": "1º Ano A", "turno": "Manhã", "detalhes": "Manhã"},
+                {"id": "d1", "tipo": "Disciplina", "nome": "Matemática", "detalhes": ""},
+            ],
+            "availability": [
+                {"id": "av1", "email": "ana@escola.com", "slotId": "s1"},
+                {"id": "av2", "email": "ana@escola.com", "slotId": "s2"},
+            ],
+            "allocations": [
+                {"id": "al1", "materia": "d1", "professor": "ana@escola.com", "turma": "t1", "aulas": "2"},
+            ],
+            "semente": 42,
+        }
+        resp = self.client.post("/api/execucoes/gerar/", payload, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["status"], StatusExecucao.CONCLUIDA)
+        self.assertEqual(len(resp.data["grade"]), 2)
+        self.assertTrue(resp.data["metricas"]["valida"])
+
+    def test_geracao_via_payload_vazio_carrega_demonstracao(self) -> None:
+        resp = self.client.post("/api/execucoes/gerar/", {"semente": 42}, format="json")
+        self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(resp.data["status"], StatusExecucao.CONCLUIDA)
+        self.assertIn("dados_sincronizados", resp.data)
+        self.assertGreater(len(resp.data["grade"]), 0)
+

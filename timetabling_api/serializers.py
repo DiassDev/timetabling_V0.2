@@ -138,6 +138,8 @@ class AulaAgendadaSerializer(serializers.ModelSerializer):
 class ExecucaoGeracaoSerializer(serializers.ModelSerializer):
     aulas_agendadas = AulaAgendadaSerializer(many=True, read_only=True)
     diagnosticos = DiagnosticoInviabilidadeSerializer(many=True, read_only=True)
+    grade = serializers.SerializerMethodField()
+    metricas = serializers.SerializerMethodField()
 
     class Meta:
         model = ExecucaoGeracao
@@ -153,12 +155,30 @@ class ExecucaoGeracaoSerializer(serializers.ModelSerializer):
             "violacoes_fracas",
             "aulas_agendadas",
             "diagnosticos",
+            "grade",
+            "metricas",
         ]
+
+    def get_grade(self, obj: ExecucaoGeracao) -> list[dict]:
+        if isinstance(obj.parametros, dict) and isinstance(obj.parametros.get("grade"), list):
+            return obj.parametros["grade"]
+        return []
+
+    def get_metricas(self, obj: ExecucaoGeracao) -> dict | None:
+        if isinstance(obj.parametros, dict) and isinstance(obj.parametros.get("metricas"), dict):
+            return obj.parametros["metricas"]
+        return None
 
 
 class SolicitarGeracaoSerializer(serializers.Serializer):
-    """Payload de entrada para acionar a geração automática de horários."""
+    """Payload de entrada para acionar a geração automática de horários via IDs ou dados do frontend."""
 
-    periodo_letivo_id = serializers.IntegerField()
-    solicitado_por_id = serializers.IntegerField()
+    periodo_letivo_id = serializers.IntegerField(required=False, allow_null=True)
+    solicitado_por_id = serializers.IntegerField(required=False, allow_null=True)
     semente = serializers.IntegerField(required=False, allow_null=True, default=None)
+    solicitado_por = serializers.DictField(required=False, default=dict)
+    accounts = serializers.ListField(child=serializers.DictField(), required=False, default=list)
+    slots = serializers.ListField(child=serializers.DictField(), required=False, default=list)
+    academic = serializers.ListField(child=serializers.DictField(), required=False, default=list)
+    availability = serializers.ListField(child=serializers.DictField(), required=False, default=list)
+    allocations = serializers.ListField(child=serializers.DictField(), required=False, default=list)

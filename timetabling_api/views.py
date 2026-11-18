@@ -42,7 +42,7 @@ from .serializers import (
     TurmaSerializer,
     UsuarioSerializer,
 )
-from .services import executar_geracao_horario
+from .services import executar_geracao_via_api
 
 
 class UsuarioViewSet(viewsets.ModelViewSet):
@@ -125,18 +125,17 @@ class ExecucaoGeracaoViewSet(viewsets.ReadOnlyModelViewSet):
         entrada = SolicitarGeracaoSerializer(data=request.data)
         entrada.is_valid(raise_exception=True)
 
-        execucao = executar_geracao_horario(
-            periodo_letivo_id=entrada.validated_data["periodo_letivo_id"],
-            solicitado_por_id=entrada.validated_data["solicitado_por_id"],
-            semente=entrada.validated_data.get("semente"),
-        )
-        saida = self.get_serializer(execucao)
+        execucao, dados_sincronizados = executar_geracao_via_api(entrada.validated_data)
+        saida = dict(self.get_serializer(execucao).data)
+        if dados_sincronizados is not None:
+            saida["dados_sincronizados"] = dados_sincronizados
+
         codigo_http = (
             status.HTTP_201_CREATED
             if execucao.status == StatusExecucao.CONCLUIDA
             else status.HTTP_422_UNPROCESSABLE_ENTITY
         )
-        return Response(saida.data, status=codigo_http)
+        return Response(saida, status=codigo_http)
 
 
 class AulaAgendadaViewSet(viewsets.ReadOnlyModelViewSet):

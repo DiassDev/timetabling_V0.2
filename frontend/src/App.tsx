@@ -1,96 +1,525 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { Activity, ArrowLeft, BookOpen, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3, Download, GraduationCap, LayoutDashboard, LogOut, Menu, Plus, RotateCcw, Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles, Trash2, Users, X, Pencil } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Login } from './components/auth/Login'
+import { Footer } from './components/layout/Footer'
+import { Header } from './components/layout/Header'
+import { PageHeader } from './components/layout/PageHeader'
+import { Sidebar } from './components/layout/Sidebar'
+import { EditorModal } from './components/modals/EditorModal'
+import { requestScheduleGeneration } from './components/shared/api'
+import { emptyData, labels } from './components/shared/constants'
+import type {
+  Account,
+  Data,
+  GenerationResult,
+  Role,
+  Row,
+  Screen,
+} from './components/shared/types'
+import {
+  id,
+  resolveAcademicName,
+  resolveProfessorName,
+  sectionFor,
+  toMinutes,
+  useStoredState,
+} from './components/shared/utils'
+import { Toast } from './components/ui/Toast'
+import { Dashboard } from './components/views/Dashboard'
+import { RecordsTable } from './components/views/RecordsTable'
+import { Schedule } from './components/views/Schedule'
+import { UsersManagement } from './components/views/UsersManagement'
 
-type Role = 'ADMIN' | 'COORDENADOR' | 'PROFESSOR'
-type Screen = 'Visão geral' | 'Horários' | 'Alocações' | 'Disponibilidade' | 'Estrutura acadêmica' | 'Slots de horário' | 'Usuários'
-type Account = { id:string; name:string; email:string; password:string; role:Role }
-type Row = { id:string; [key:string]:string }
-type Data = { academic:Row[]; slots:Row[]; allocations:Row[]; availability:Row[] }
-const labels:Record<Role,string>={ADMIN:'Administrador',COORDENADOR:'Coordenador',PROFESSOR:'Professor'}
-const weekDays=['Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado']
-const screens:Record<Role,Array<[Screen,LucideIcon]>>={
- ADMIN:[['Visão geral',LayoutDashboard],['Horários',CalendarDays],['Estrutura acadêmica',GraduationCap],['Usuários',Users],['Slots de horário',Settings2]],
- COORDENADOR:[['Visão geral',LayoutDashboard],['Horários',CalendarDays],['Alocações',BookOpen],['Disponibilidade',Clock3],['Estrutura acadêmica',GraduationCap]],
- PROFESSOR:[['Horários',CalendarDays],['Disponibilidade',Clock3]],
+export default function App() {
+  const [accounts, setAccounts] = useStoredState<Account[]>(
+    'grade.accounts',
+    []
+  )
+  const [data, setData] = useStoredState<Data>('grade.data', emptyData)
+  const [session, setSession] = useStoredState<Account | null>(
+    'grade.session',
+    null
+  )
+  const [generationResult, setGenerationResult] =
+    useStoredState<GenerationResult | null>('grade.generation', null)
+
+  const [screen, setScreen] = useState<Screen>('Horários')
+  const [screenHistory, setScreenHistory] = useState<Screen[]>([])
+  const [toast, setToast] = useState('')
+  const [mobile, setMobile] = useState(false)
+  const [editor, setEditor] = useState<Row | null>(null)
+  const [search, setSearch] = useState('')
+  const [loginError, setLoginError] = useState('')
+  const [loginRole, setLoginRole] = useState<Role>('COORDENADOR')
+  const [isGenerating, setIsGenerating] = useState(false)
+
+  const notify = (message: string) => {
+    setToast(message)
+    window.setTimeout(() => setToast(''), 3200)
+  }
+
+  const active = session && accounts.find(a => a.id === session.id)
+  const role = active?.role
+  const isFirst = !accounts.some(account => account.role === 'ADMIN')
+
+  const go = (next: Screen) => {
+    if (next !== screen) setScreenHistory(old => [...old, screen])
+    setScreen(next)
+    setMobile(false)
+    setSearch('')
+  }
+
+  const goBack = () => {
+    const previous = screenHistory[screenHistory.length - 1]
+    if (!previous) return
+    setScreenHistory(old => old.slice(0, -1))
+    setScreen(previous)
+    setMobile(false)
+    setSearch('')
+  }
+
+  const createAccount = (account: Account) => {
+    setAccounts(old => [...old, account])
+    setSession(account)
+    setScreen('Horários')
+    notify('Acesso criado. A grade da escola já está disponível.')
+  }
+
+  const logout = () => {
+    setSession(null)
+    setScreenHistory([])
+    setLoginError('')
+  }
+
+  const resetAll = () => {
+    if (role !== 'ADMIN') return
+    const confirmed = window.confirm(
+      'Isso apagará todos os acessos e todos os horários e cadastros salvos neste navegador. Essa ação não pode ser desfeita. Deseja recomeçar do zero?'
+    )
+    if (!confirmed) return
+
+    ;[
+      'grade.accounts',
+      'grade.data',
+      'grade.session',
+      'grade.generation',
+    ].forEach(key => localStorage.removeItem(key))
+    setAccounts([])
+    setData(emptyData)
+    setGenerationResult(null)
+    setSession(null)
+    setScreen('Horários')
+    setScreenHistory([])
+    setEditor(null)
+    setSearch('')
+    notify('Tudo foi limpo. Cadastre o administrador para começar novamente.')
+  }
+
+  const saveRow = (section: keyof Data, row: Row) => {
+    setData(old => ({
+      ...old,
+      [section]: old[section].some(x => x.id === row.id)
+        ? old[section].map(x => (x.id === row.id ? row : x))
+        : [...old[section], row],
+    }))
+    setEditor(null)
+    notify('Informações salvas.')
+  }
+
+  const deleteRow = (section: keyof Data, rowId: string) => {
+    setData(old => ({
+      ...old,
+      [section]: old[section].filter(x => x.id !== rowId),
+    }))
+    notify('Registro removido.')
+  }
+
+  const deleteAccount = (accountId: string) => {
+    setAccounts(old => old.filter(a => a.id !== accountId))
+    notify('Acesso removido.')
+  }
+
+  const ownAvailability =
+    role === 'PROFESSOR'
+      ? data.availability.filter(a => a.email === active?.email)
+      : data.availability
+
+  const visibleRows = useMemo(() => {
+    const section = sectionFor(screen)
+    const rows = section
+      ? screen === 'Disponibilidade'
+        ? ownAvailability
+        : data[section]
+      : []
+
+    const term = search.trim().toLowerCase()
+    return term
+      ? rows.filter(row =>
+          Object.values(row).some(v => v.toLowerCase().includes(term))
+        )
+      : rows
+  }, [screen, data, ownAvailability, search])
+
+  if (!active) {
+    return (
+      <Login
+        first={isFirst}
+        accounts={accounts}
+        onCreate={createAccount}
+        onLogin={(email, password, wanted) => {
+          const byEmail = accounts.find(
+            a => a.email.toLowerCase() === email.trim().toLowerCase()
+          )
+          const found =
+            byEmail && byEmail.password === password && byEmail.role === wanted
+              ? byEmail
+              : null
+
+          if (found) {
+            setSession(found)
+            setScreen('Horários')
+            setLoginError('')
+          } else if (!byEmail && accounts.length === 0) {
+            setLoginError(
+              'Ainda não há acesso cadastrado. Use “Primeiro acesso” para começar.'
+            )
+          } else if (!byEmail) {
+            setLoginError(
+              'Não encontramos esse e-mail. Peça ao administrador para criar seu acesso.'
+            )
+          } else if (byEmail.role !== wanted) {
+            setLoginError(
+              `Este e-mail está cadastrado como ${labels[byEmail.role]}. Escolha esse perfil para entrar.`
+            )
+          } else {
+            setLoginError(
+              'A senha não confere. Tente novamente ou peça ajuda ao administrador.'
+            )
+          }
+        }}
+        error={loginError}
+        role={loginRole}
+        setRole={setLoginRole}
+      />
+    )
+  }
+
+  const addAction =
+    screen === 'Alocações'
+      ? 'Nova alocação'
+      : screen === 'Disponibilidade'
+        ? 'Adicionar horário disponível'
+        : screen === 'Estrutura acadêmica'
+          ? 'Novo cadastro'
+          : screen === 'Slots de horário'
+            ? 'Novo slot'
+            : ''
+
+  const createNew = () => {
+    if (screen === 'Slots de horário' && role !== 'ADMIN') {
+      notify('Somente o administrador pode alterar os horários-base.')
+      return
+    }
+    setEditor({ id: id() })
+  }
+
+  const handleGenerateSchedule = async () => {
+    if (isGenerating) return
+    setIsGenerating(true)
+    try {
+      const { result, syncedData } = await requestScheduleGeneration({
+        active,
+        accounts,
+        data,
+      })
+
+      if (syncedData) {
+        setData({
+          slots: syncedData.slots,
+          academic: syncedData.academic,
+          allocations: syncedData.allocations,
+          availability: syncedData.availability,
+        })
+        setAccounts(syncedData.accounts)
+      }
+
+      setGenerationResult(result)
+
+      if (result.status === 'CONCLUIDA') {
+        notify(
+          `Grade gerada com sucesso (${result.grade.length} aulas alocadas).`
+        )
+        if (screen !== 'Horários' && screen !== 'Visão geral') {
+          go('Horários')
+        }
+      } else {
+        const msg =
+          result.diagnosticos[0]?.mensagem ||
+          'Não foi possível gerar a grade com as restrições atuais.'
+        notify(msg)
+      }
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Erro ao comunicar com o motor de geração.'
+      notify(msg)
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  const exportSchedule = () => {
+    const hasGenerated =
+      generationResult?.status === 'CONCLUIDA' &&
+      generationResult.grade.length > 0
+
+    const lines = [
+      ['Dia', 'Início', 'Turno', 'Matéria', 'Professor', 'Turma'],
+      ...(hasGenerated
+        ? generationResult.grade
+            .filter(
+              g =>
+                role !== 'PROFESSOR' ||
+                g.professorEmail.toLowerCase() === active.email.toLowerCase()
+            )
+            .map(g => [
+              g.dia,
+              g.inicio,
+              g.turno,
+              g.materia,
+              g.professor,
+              g.turma,
+            ])
+        : (role === 'PROFESSOR'
+            ? data.allocations.filter(a => a.professor === active.email)
+            : data.allocations
+          ).map(a => {
+            const slot = data.slots.find(s => s.id === a.slotId)
+            return [
+              slot?.dia || '',
+              slot?.inicio || '',
+              slot?.turno || '',
+              resolveAcademicName(data, a.materia),
+              resolveProfessorName(accounts, a.professor),
+              resolveAcademicName(data, a.turma),
+            ]
+          })),
+    ]
+
+    const csv = lines
+      .map(line =>
+        line.map(v => `"${String(v).replaceAll('"', '""')}"`).join(';')
+      )
+      .join('\n')
+
+    const url = URL.createObjectURL(
+      new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' })
+    )
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'horario-escolar.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+    notify('Arquivo de horários baixado.')
+  }
+
+  const handleSaveEditor = (row: Row) => {
+    if (screen === 'Usuários') {
+      if (
+        accounts.some(
+          a => a.email.toLowerCase() === row.email.toLowerCase()
+        )
+      ) {
+        notify('Já existe um acesso com este e-mail.')
+        return
+      }
+      const account: Account = {
+        id: row.id,
+        name: row.name,
+        email: row.email,
+        password: row.password,
+        role: row.role as Role,
+      }
+      setAccounts(old => [...old, account])
+      setEditor(null)
+      notify('Acesso criado com sucesso.')
+      return
+    }
+
+    const section = sectionFor(screen)
+    if (!section) return
+
+    if (section === 'slots' && active.role !== 'ADMIN') {
+      notify('Somente o administrador pode alterar os horários-base.')
+      return
+    }
+
+    if (
+      section === 'availability' &&
+      active.role === 'PROFESSOR' &&
+      row.email !== active.email
+    ) {
+      notify('Você só pode alterar sua própria disponibilidade.')
+      return
+    }
+
+    if (section === 'slots') {
+      const start = toMinutes(row.inicio)
+      const end = start + Number(row.duracao || 0)
+      const overlap = data.slots.some(
+        s =>
+          s.id !== row.id &&
+          s.dia === row.dia &&
+          s.turno === row.turno &&
+          start < toMinutes(s.inicio) + Number(s.duracao) &&
+          toMinutes(s.inicio) < end
+      )
+      if (overlap) {
+        notify(
+          'Esse horário se sobrepõe a outro. Escolha outro início ou duração.'
+        )
+        return
+      }
+    }
+
+    if (section === 'allocations' && row.slotId) {
+      const duplicate = data.allocations.some(
+        a =>
+          a.id !== row.id &&
+          Boolean(a.slotId) &&
+          a.slotId === row.slotId &&
+          (a.professor === row.professor || a.turma === row.turma)
+      )
+      if (duplicate) {
+        notify(
+          'Esse horário já está ocupado pelo professor ou pela turma.'
+        )
+        return
+      }
+    }
+
+    if (section === 'availability') {
+      const duplicate = data.availability.some(
+        a =>
+          a.id !== row.id &&
+          a.email === row.email &&
+          a.slotId === row.slotId
+      )
+      if (duplicate) {
+        notify(
+          'Esse professor já informou disponibilidade nesse horário.'
+        )
+        return
+      }
+    }
+
+    saveRow(section, row)
+  }
+
+  return (
+    <div className="app">
+      <Sidebar
+        active={active}
+        screen={screen}
+        mobile={mobile}
+        allocationsCount={
+          generationResult?.status === 'CONCLUIDA' &&
+          generationResult.grade.length > 0
+            ? generationResult.grade.length
+            : data.allocations.length
+        }
+        onNavigate={go}
+        onCloseMobile={() => setMobile(false)}
+        onHelp={() => notify('Converse com a equipe responsável pela escola.')}
+        onLogout={logout}
+      />
+
+      <main>
+        <Header
+          screen={screen}
+          role={active.role}
+          canGoBack={screenHistory.length > 0}
+          search={search}
+          isGenerating={isGenerating}
+          onSearchChange={setSearch}
+          onGoBack={goBack}
+          onOpenMobileMenu={() => setMobile(true)}
+          onGenerateSchedule={handleGenerateSchedule}
+          onLogout={logout}
+        />
+
+        <div className="content">
+          <PageHeader
+            screen={screen}
+            active={active}
+            addAction={addAction}
+            onExportSchedule={exportSchedule}
+            onCreateNew={createNew}
+          />
+
+          {screen === 'Visão geral' ? (
+            <Dashboard
+              role={active.role}
+              data={data}
+              accounts={accounts}
+              generationResult={generationResult}
+              isGenerating={isGenerating}
+              onGenerateSchedule={handleGenerateSchedule}
+              onNavigate={go}
+            />
+          ) : screen === 'Horários' ? (
+            <Schedule
+              data={data}
+              accounts={accounts}
+              role={active.role}
+              email={active.email}
+              generationResult={generationResult}
+              onExport={exportSchedule}
+            />
+          ) : screen === 'Usuários' ? (
+            <UsersManagement
+              accounts={accounts}
+              onResetAll={resetAll}
+              onCreateRole={targetRole =>
+                setEditor({ id: id(), role: targetRole })
+              }
+              onDeleteAccount={deleteAccount}
+            />
+          ) : (
+            <RecordsTable
+              screen={screen}
+              rows={visibleRows}
+              data={data}
+              accounts={accounts}
+              role={active.role}
+              onEdit={row => setEditor(row)}
+              onDelete={row => {
+                const section = sectionFor(screen)
+                if (section) deleteRow(section, row.id)
+              }}
+              onAvailabilityCreate={() => {
+                setEditor({ id: id(), email: active.email })
+              }}
+            />
+          )}
+
+          <Footer />
+        </div>
+      </main>
+
+      {editor && (
+        <EditorModal
+          screen={screen}
+          row={editor}
+          data={data}
+          accounts={accounts}
+          role={active.role}
+          onClose={() => setEditor(null)}
+          onSave={handleSaveEditor}
+        />
+      )}
+
+      <Toast message={toast} />
+    </div>
+  )
 }
-const emptyData:Data={academic:[],slots:[],allocations:[],availability:[]}
-function stored<T>(key:string, fallback:T):[T,(value:T|((old:T)=>T))=>void]{const [value,setValue]=useState<T>(()=>{try{const raw=localStorage.getItem(key);if(!raw)return fallback;const parsed:unknown=JSON.parse(raw);if(key==='grade.accounts'){if(!Array.isArray(parsed))return fallback;return parsed.filter((a):a is Account=>Boolean(a&&typeof a.id==='string'&&typeof a.name==='string'&&typeof a.email==='string'&&typeof a.password==='string'&&['ADMIN','COORDENADOR','PROFESSOR'].includes(a.role))) as T}if(key==='grade.session'){if(!parsed||typeof parsed!=='object'||typeof (parsed as Account).id!=='string')return fallback}if(key==='grade.data'){if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))return fallback;const source=parsed as Record<string,unknown>;const safeRows=(value:unknown):Row[]=>Array.isArray(value)?value.filter(item=>item&&typeof item==='object'&&typeof (item as Row).id==='string').map(item=>Object.fromEntries(Object.entries(item as Row).map(([k,v])=>[k,String(v??'')])) as Row):[];return{academic:safeRows(source.academic),slots:safeRows(source.slots),allocations:safeRows(source.allocations),availability:safeRows(source.availability)} as T}return parsed as T}catch{return fallback}});useEffect(()=>{try{localStorage.setItem(key,JSON.stringify(value))}catch{/* Mantém a tela utilizável se o navegador bloquear o armazenamento. */}},[key,value]);return[value,setValue]}
-const id=()=>`${Date.now()}-${Math.random().toString(36).slice(2,8)}`
-const readLabel=(row:Row|undefined, key:string, fallback='')=>row?.[key]||fallback
-
-export default function App(){
- const [accounts,setAccounts]=stored<Account[]>('grade.accounts',[]),[data,setData]=stored<Data>('grade.data',emptyData),[session,setSession]=stored<Account|null>('grade.session',null)
- const [screen,setScreen]=useState<Screen>('Horários'),[screenHistory,setScreenHistory]=useState<Screen[]>([]),[toast,setToast]=useState(''),[mobile,setMobile]=useState(false),[editor,setEditor]=useState<Row|null>(null),[search,setSearch]=useState(''),[loginError,setLoginError]=useState(''),[loginRole,setLoginRole]=useState<Role>('COORDENADOR')
- const notify=(message:string)=>{setToast(message);window.setTimeout(()=>setToast(''),3200)}
- const active=session&&accounts.find(a=>a.id===session.id)
- const role=active?.role
- const isFirst=!accounts.some(account=>account.role==='ADMIN')
- const nav=role?screens[role]:[]
- const go=(next:Screen)=>{if(next!==screen)setScreenHistory(old=>[...old,screen]);setScreen(next);setMobile(false);setSearch('')}
- const goBack=()=>{const previous=screenHistory[screenHistory.length-1];if(!previous)return;setScreenHistory(old=>old.slice(0,-1));setScreen(previous);setMobile(false);setSearch('')}
- const createAccount=(account:Account)=>{setAccounts(old=>[...old,account]);setSession(account);setScreen('Horários');notify('Acesso criado. A grade da escola já está disponível.')}
- const logout=()=>{setSession(null);setScreenHistory([]);setLoginError('')}
- const resetAll=()=>{if(role!=='ADMIN')return;const confirmed=window.confirm('Isso apagará todos os acessos e todos os horários e cadastros salvos neste navegador. Essa ação não pode ser desfeita. Deseja recomeçar do zero?');if(!confirmed)return;['grade.accounts','grade.data','grade.session'].forEach(key=>localStorage.removeItem(key));setAccounts([]);setData(emptyData);setSession(null);setScreen('Horários');setScreenHistory([]);setEditor(null);setSearch('');notify('Tudo foi limpo. Cadastre o administrador para começar novamente.')}
- const saveRow=(section:keyof Data,row:Row)=>{setData(old=>({...old,[section]:old[section].some(x=>x.id===row.id)?old[section].map(x=>x.id===row.id?row:x):[...old[section],row]}));setEditor(null);notify('Informações salvas.')}
- const deleteRow=(section:keyof Data,rowId:string)=>{setData(old=>({...old,[section]:old[section].filter(x=>x.id!==rowId)}));notify('Registro removido.')}
- const deleteAccount=(accountId:string)=>{setAccounts(old=>old.filter(a=>a.id!==accountId));notify('Acesso removido.')}
- const ownAvailability=role==='PROFESSOR'?data.availability.filter(a=>a.email===active?.email):data.availability
- const visibleRows=useMemo(()=>{const section=screen==='Alocações'?'allocations':screen==='Disponibilidade'?'availability':screen==='Estrutura acadêmica'?'academic':screen==='Slots de horário'?'slots':undefined;const rows=section?(screen==='Disponibilidade'?ownAvailability:data[section]):[];const term=search.trim().toLowerCase();return term?rows.filter(row=>Object.values(row).some(v=>v.toLowerCase().includes(term))):rows},[screen,data,ownAvailability,search])
-
- if(!active)return <Login first={isFirst} accounts={accounts} onCreate={createAccount} onLogin={(email,password,wanted)=>{const byEmail=accounts.find(a=>a.email.toLowerCase()===email.trim().toLowerCase());const found=byEmail&&byEmail.password===password&&byEmail.role===wanted?byEmail:null;if(found){setSession(found);setScreen('Horários');setLoginError('')}else if(!byEmail&&accounts.length===0)setLoginError('Ainda não há acesso cadastrado. Use “Primeiro acesso” para começar.');else if(!byEmail)setLoginError(`Não encontramos esse e-mail. Peça ao administrador para criar seu acesso.`);else if(byEmail.role!==wanted)setLoginError(`Este e-mail está cadastrado como ${labels[byEmail.role]}. Escolha esse perfil para entrar.`);else setLoginError('A senha não confere. Tente novamente ou peça ajuda ao administrador.')}} error={loginError} role={loginRole} setRole={setLoginRole}/>
-
- const title=screen==='Visão geral'?'Olá, '+active.name.split(' ')[0]:screen
- const allocationFields=[{key:'slotId',label:'Horário',type:'select',options:data.slots.map(s=>[s.id,`${s.dia} · ${s.inicio} · ${s.turno}`])},{key:'materia',label:'Matéria',type:'select',options:data.academic.filter(a=>a.tipo==='Disciplina').map(a=>[a.id,a.nome])},{key:'professor',label:'Professor',type:'select',options:accounts.filter(a=>a.role==='PROFESSOR').map(a=>[a.email,a.name])},{key:'turma',label:'Turma',type:'select',options:data.academic.filter(a=>a.tipo==='Turma').map(a=>[a.id,a.nome])},{key:'aulas',label:'Aulas por semana',type:'number'}]
- const slotFields=[{key:'dia',label:'Dia da semana',type:'select',options:weekDays.map(d=>[d,d])},{key:'turno',label:'Turno',type:'select',options:[['Manhã','Manhã'],['Tarde','Tarde'],['Noite','Noite']]},{key:'inicio',label:'Horário de início',type:'time'},{key:'duracao',label:'Duração (minutos)',type:'number'}]
- const availFields=[{key:'slotId',label:'Horário disponível',type:'select',options:data.slots.map(s=>[s.id,`${s.dia} · ${s.inicio} · ${s.turno}`])}]
- const academicFields=[{key:'tipo',label:'O que deseja cadastrar?',type:'select',options:[['Curso','Curso'],['Turma','Turma'],['Disciplina','Disciplina']]},{key:'nome',label:'Nome',type:'text'},{key:'detalhes',label:'Detalhes',type:'text'}]
- const filters={"Alocações":data.allocations,"Disponibilidade":ownAvailability,"Estrutura acadêmica":data.academic,"Slots de horário":data.slots}
- const sectionFor=(s:Screen):keyof Data|undefined=>s==='Alocações'?'allocations':s==='Disponibilidade'?'availability':s==='Estrutura acadêmica'?'academic':s==='Slots de horário'?'slots':undefined
- const addAction=screen==='Alocações'?'Nova alocação':screen==='Disponibilidade'?'Adicionar horário disponível':screen==='Estrutura acadêmica'?'Novo cadastro':screen==='Slots de horário'?'Novo slot':''
- const createNew=()=>{if(screen==='Slots de horário'&&role!=='ADMIN'){notify('Somente o administrador pode alterar os horários-base.');return}setEditor({id:id()})}
- const exportSchedule=()=>{const rows=role==='PROFESSOR'?data.allocations.filter(a=>a.professor===active.email):data.allocations;const lines=[['Dia','Início','Turno','Matéria','Professor','Turma'],...rows.map(a=>{const slot=data.slots.find(s=>s.id===a.slotId);return[slot?.dia||'',slot?.inicio||'',slot?.turno||'',a.materia||'',a.professor||'',a.turma||'']})];const csv=lines.map(line=>line.map(v=>`"${String(v).replaceAll('"','""')}"`).join(';')).join('\n');const url=URL.createObjectURL(new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='horario-escolar.csv';a.click();URL.revokeObjectURL(url);notify('Arquivo de horários baixado.')}
- return <div className="app"><aside className={'sidebar '+(mobile?'open':'')}><div className="brand"><i><CalendarDays size={17}/></i>grade<span>.</span>{mobile&&<button className="icon mobile-close" onClick={()=>setMobile(false)}><X size={18}/></button>}</div><div className="workspace"><b>IF</b><span><strong>Instituto Farol</strong><small>Unidade Centro</small></span><ChevronDown size={15}/></div><label className="caption">MENU PRINCIPAL</label><nav>{nav.map(([label,Icon])=><button key={label} className={'nav-item '+(screen===label?'active':'')} onClick={()=>go(label)}><Icon size={17}/>{label}{label==='Horários'&&data.allocations.length>0&&<em>{data.allocations.length}</em>}</button>)}</nav><div className="side-bottom"><div className="help-card"><CircleHelp size={18}/><strong>Precisa de ajuda?</strong><p>Consulte a equipe da sua escola.</p><a onClick={()=>notify('Converse com a equipe responsável pela escola.')}>Como podemos ajudar?</a></div><div className="user"><b>{active.name.split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase()}</b><span><strong>{active.name}</strong><small>{labels[active.role]}</small></span><button className="icon" title="Sair" onClick={logout}><LogOut size={16}/></button></div></div></aside>{mobile&&<button className="scrim" onClick={()=>setMobile(false)} aria-label="Fechar menu"/>}
- <main><header className="top"><div className="crumb">{screenHistory.length>0&&<button className="icon back-screen" onClick={goBack} title="Voltar à tela anterior" aria-label="Voltar à tela anterior"><ArrowLeft size={17}/></button>}<button className="icon mobile-menu" onClick={()=>setMobile(true)} aria-label="Abrir menu"><Menu size={19}/></button>Instituto Farol <i>/</i> <b>{screen}</b></div><div className="top-right"><label className="search"><Search size={15}/><input aria-label="Buscar" placeholder="Buscar..." value={search} onChange={e=>setSearch(e.target.value)}/></label><span className="role-chip"><ShieldCheck size={14}/>{labels[active.role]}</span><button className="icon" onClick={logout} title="Sair"><LogOut size={16}/></button></div></header><div className="content"><div className="heading"><div><div className="eyebrow"><i/> INSTITUTO FAROL <span>/</span> {labels[active.role].toUpperCase()}</div><h1>{title}{screen==='Horários'&&<small> · Grade da escola</small>}</h1><p>{screenDescription(screen,active.role)}</p></div><div className="actions">{screen==='Horários'&&<button className="btn secondary" onClick={exportSchedule}><Download size={15}/> Baixar horários</button>}{addAction&&<button className="btn primary" onClick={createNew}><Plus size={15}/>{addAction}</button>}</div></div>
-  {screen==='Visão geral'?<Dashboard role={active.role} data={data} accounts={accounts} onNavigate={go}/>:screen==='Horários'?<Schedule data={data} role={active.role} email={active.email} onExport={exportSchedule}/>:screen==='Usuários'?<section className="table-panel"><div className="table-title"><div><h2>Acessos da escola</h2><p>Crie ou remova acessos de coordenadores e professores.</p></div><div className="account-actions"><button className="btn secondary" onClick={resetAll}><RotateCcw size={14}/>Recomeçar do zero</button><button className="btn secondary" onClick={()=>setEditor({id:id(),role:"PROFESSOR"})}><Plus size={15}/>Cadastrar professor</button><button className="btn primary" onClick={()=>setEditor({id:id(),role:"COORDENADOR"})}><Plus size={15}/>Cadastrar coordenador</button></div></div><div className="table-scroll"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th></th></tr></thead><tbody>{accounts.filter(a=>a.role!=='ADMIN').map(a=><tr key={a.id}><td>{a.name}</td><td>{a.email}</td><td>{labels[a.role]}</td><td><button className="icon danger" onClick={()=>deleteAccount(a.id)} title="Remover acesso"><Trash2 size={15}/></button></td></tr>)}</tbody></table></div>{accounts.length===1&&<p className="empty">Ainda não há outros acessos cadastrados.</p>}</section>:<Records screen={screen} rows={visibleRows} data={data} accounts={accounts} role={active.role} onEdit={row=>setEditor(row)} onDelete={row=>{const section=sectionFor(screen);if(section)deleteRow(section,row.id)}} onAvailabilityCreate={()=>{setEditor({id:id(),email:active.email})}}/>}
- <footer>© 2025 Grade Escolar <span>Organização dos horários escolares</span><small>Ajuda</small></footer></div></main>
-  {editor&&<Editor screen={screen} row={editor} data={data} accounts={accounts} role={active.role} onClose={()=>setEditor(null)} onSave={row=>{if(screen==='Usuários'){if(accounts.some(a=>a.email.toLowerCase()===row.email.toLowerCase())){notify('Já existe um acesso com este e-mail.');return}const account:Account={id:row.id,name:row.name,email:row.email,password:row.password,role:row.role as Role};setAccounts(old=>[...old,account]);setEditor(null);notify('Acesso criado com sucesso.');return}const section=sectionFor(screen);if(!section)return;if(section==='slots'&&active.role!=='ADMIN'){notify('Somente o administrador pode alterar os horários-base.');return}if(section==='availability'&&active.role==='PROFESSOR'&&row.email!==active.email){notify('Você só pode alterar sua própria disponibilidade.');return}if(section==='slots'){const start=toMinutes(row.inicio),end=start+Number(row.duracao||0);const overlap=data.slots.some(s=>s.id!==row.id&&s.dia===row.dia&&s.turno===row.turno&&start<toMinutes(s.inicio)+Number(s.duracao)&&toMinutes(s.inicio)<end);if(overlap){notify('Esse horário se sobrepõe a outro. Escolha outro início ou duração.');return}}if(section==='allocations'){const duplicate=data.allocations.some(a=>a.id!==row.id&&a.slotId===row.slotId&&(a.professor===row.professor||a.turma===row.turma));if(duplicate){notify('Esse horário já está ocupado pelo professor ou pela turma.');return}}if(section==='availability'){const duplicate=data.availability.some(a=>a.id!==row.id&&a.email===row.email&&a.slotId===row.slotId);if(duplicate){notify('Esse professor já informou disponibilidade nesse horário.');return}}saveRow(section,row)}}/>}
- {toast&&<div className="toast"><Check size={16}/>{toast}</div>}</div>
-}
-
-function Login({first,accounts,onCreate,onLogin,error,role,setRole}:{first:boolean;accounts:Account[];onCreate:(account:Account)=>void;onLogin:(email:string,password:string,role:Role)=>void;error:string;role:Role;setRole:(role:Role)=>void}){
- const [setup,setSetup]=useState(false),[name,setName]=useState(''),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[confirm,setConfirm]=useState(''),[localError,setLocalError]=useState('')
- const submit=(e:FormEvent)=>{e.preventDefault();if(!email.trim()||!password||(setup&&!name.trim())){setLocalError('Preencha todos os campos.');return}if(setup){if(accounts.some(a=>a.email.toLowerCase()===email.trim().toLowerCase())){setLocalError('Já existe um acesso com esse e-mail.');return}if(password.length<6){setLocalError('Use uma senha com pelo menos 6 caracteres.');return}if(password!==confirm){setLocalError('As senhas não são iguais.');return}onCreate({id:id(),name:name.trim(),email:email.trim(),password,role:'ADMIN'})}else onLogin(email,password,role)}
- const clearForm=()=>{setName('');setEmail('');setPassword('');setConfirm('');setLocalError('')}
- const title=setup?'Vamos preparar seu acesso':first?'Acesse sua escola':'Que bom ter você de volta'
- const subtitle=setup?'Cadastre o administrador para começar a organizar os horários.':'Entre para consultar as grades e os horários da escola.'
- return <div className="login-page"><div className="login-brand"><i><CalendarDays size={20}/></i>grade<span>.</span></div><section className="login-card"><div className="login-icon"><CalendarDays size={22}/></div><p className="login-overline">INSTITUTO FAROL</p><h1>{title}</h1><p className="login-sub">{subtitle}</p><form onSubmit={submit}>
- {!setup&&<div className="login-role-picker"><span>Escolha seu perfil</span><div>{(['COORDENADOR','ADMIN','PROFESSOR'] as Role[]).map(option=><button type="button" key={option} className={role===option?'selected':''} onClick={()=>setRole(option)}>{labels[option]}</button>)}</div></div>}
- {setup&&<label>Seu nome<input autoComplete="name" value={name} onChange={e=>setName(e.target.value)} required placeholder="Seu nome"/></label>}
- <label>E-mail<input type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} required placeholder="voce@escola.com"/></label>
- <label>Senha<input type="password" autoComplete={setup?'new-password':'current-password'} value={password} onChange={e=>setPassword(e.target.value)} required placeholder={setup?'Crie uma senha':'Digite sua senha'}/></label>
- {setup&&<label>Repita a senha<input type="password" autoComplete="new-password" value={confirm} onChange={e=>setConfirm(e.target.value)} required placeholder="Digite a senha novamente"/></label>}
- {(localError||(!setup&&error))&&<p className="form-error">{localError||error}</p>}
- <button className="btn primary login-submit">{setup?'Criar acesso de administrador':'Entrar'} <ChevronRight size={16}/></button></form>
- {!setup&&<button className="forgot" onClick={()=>setLocalError('Peça ao administrador da escola para redefinir seu acesso.')}>Esqueci minha senha</button>}
- {!setup&&first&&<button className="first-access" onClick={()=>{clearForm();setSetup(true)}}>Primeiro acesso? Cadastre o administrador da escola</button>}
- {!setup&&!first&&accounts.length>0&&<p className="login-foot">Os acessos de professores e coordenadores são criados pelo administrador.</p>}
- {setup&&!first&&<button className="forgot" onClick={()=>{clearForm();setSetup(false)}}>Voltar para entrar</button>}</section><div className="login-bottom">Se precisar de ajuda, fale com a equipe da escola.</div></div>
-}
-function Dashboard({role,data,accounts,onNavigate}:{role:Role;data:Data;accounts:Account[];onNavigate:(s:Screen)=>void}){const items:[string,string,Screen,LucideIcon][]=role==='ADMIN'?[['Slots de horário','Defina os dias e os horários das aulas.','Slots de horário',Settings2],['Estrutura acadêmica','Cadastre cursos, turmas e matérias.','Estrutura acadêmica',GraduationCap],['Usuários','Gerencie os acessos da escola.','Usuários',Users]]:role==='COORDENADOR'?[['Alocações','Escolha horário, matéria, professor e turma.','Alocações',BookOpen],['Disponibilidade','Confira os horários disponíveis da equipe.','Disponibilidade',Clock3],['Horários','Consulte as aulas organizadas na semana.','Horários',CalendarDays]]:[['Disponibilidade','Informe quando pode dar aulas.','Disponibilidade',Clock3],['Horários','Consulte sua grade da semana.','Horários',CalendarDays]];return <><section className="stats"><article><i className="ib"><CalendarDays size={17}/></i><span>Alocações<strong>{data.allocations.length}<small> registradas</small></strong></span><b className="good"><Activity size={13}/>{data.allocations.length?'Em andamento':'Comece aqui'}</b></article><article><i className="iv"><Users size={17}/></i><span>Professores<strong>{accounts.filter(a=>a.role==='PROFESSOR').length}<small> cadastrados</small></strong></span><b className="avatars">{role==='ADMIN'?'Equipe':labels[role]}</b></article><article><i className="ig"><Check size={17}/></i><span>Horários-base<strong>{data.slots.length}<small> cadastrados</small></strong></span><b className="ok">{data.slots.length?'Configurados':'A configurar'}</b></article></section><div className="dashboard-grid"><section className="welcome-card"><div className="welcome-art"><Sparkles size={25}/></div><p>SEU PAINEL</p><h2>Organize a rotina da escola com clareza.</h2><span>Cadastre a estrutura, defina as aulas e consulte os horários em um só lugar.</span><button className="btn primary" onClick={()=>onNavigate(role==='ADMIN'?'Slots de horário':role==='PROFESSOR'?'Disponibilidade':'Estrutura acadêmica')}>Começar <ChevronRight size={15}/></button></section><section className="quick-card"><h2>Acesso rápido</h2>{items.map(([label,sub,target,Icon])=><button className="quick-item" key={label} onClick={()=>onNavigate(target)}><i><Icon size={16}/></i><span><strong>{label}</strong><small>{sub}</small></span><ChevronRight size={15}/></button>)}</section></div><section className="next-card"><div><strong>Próximos passos</strong><p>{role==='ADMIN'?'Defina os horários-base e cadastre os acessos da equipe.':role==='COORDENADOR'?'Confira as turmas e cadastre as aulas da semana.':'Informe sua disponibilidade para ajudar na organização.'}</p></div><button onClick={()=>onNavigate(role==='ADMIN'?'Slots de horário':role==='COORDENADOR'?'Alocações':'Disponibilidade')}>Abrir <ChevronRight size={14}/></button></section></>}
-
-function Schedule({data,role,email,onExport}:{data:Data;role:Role;email:string;onExport:()=>void}){const [turn,setTurn]=useState('Manhã');const rows=data.allocations.filter(a=>role!=='PROFESSOR'||a.professor===email);const activeSlots=data.slots.filter(s=>s.turno===turn);const defaultTimes=turn==='Manhã'?['07:10','08:00','08:50','09:55','10:45']:turn==='Tarde'?['13:10','14:00','14:50','15:55','16:45']:['19:00','19:50','20:40','21:30'];const times=[...new Set(activeSlots.map(s=>s.inicio))].sort();const visibleTimes=times.length?times:defaultTimes;return <section className="schedule"><div className="toolbar"><div><span className="select"><CalendarDays size={14}/> Grade semanal</span><div className="seg"><button className="on">Semana</button></div></div><div><div className="seg">{['Manhã','Tarde','Noite'].map(t=><button className={turn===t?'on':''} onClick={()=>setTurn(t)} key={t}>{t}</button>)}</div><button className="btn secondary" onClick={onExport}><Download size={14}/> Baixar horários</button></div></div><div className="weekbar"><strong>Horários da semana</strong><span className="legend"><i/> Aulas cadastradas</span></div><div className="grid-scroll"><div className="grid"><div className="time-head">HORÁRIO</div>{weekDays.slice(0,5).map(d=><div className="day" key={d}>{d.replace('-feira','').toUpperCase()}</div>)}{visibleTimes.map(time=><div className="row" key={time}><div className="time"><b>{time}</b><small>{activeSlots.find(s=>s.inicio===time)?.duracao||50} min</small></div>{weekDays.slice(0,5).map(d=>{const slot=activeSlots.find(s=>s.dia===d&&s.inicio===time);const lessons=slot?rows.filter(a=>a.slotId===slot.id):[];return <div className="cell" key={d}>{lessons.map((a,i)=><div className={'lesson '+['blue','peach','green','purple'][i%4]} key={a.id}><b>{a.materia}</b><span>{a.turma} · {role==='PROFESSOR'?'Minha aula':a.professor}</span><small><Users size={10}/>{a.aulas} aulas por semana</small></div>)}</div>})}</div>)}</div></div>{rows.length===0&&<Empty title="Sua grade semanal está pronta" text="Quando as aulas e os horários forem cadastrados, eles aparecerão nos espaços correspondentes."/>}</section>}
-
-function Records({screen,rows,data,accounts,role,onEdit,onDelete,onAvailabilityCreate}:{screen:Screen;rows:Row[];data:Data;accounts:Account[];role:Role;onEdit:(row:Row)=>void;onDelete:(row:Row)=>void;onAvailabilityCreate:()=>void}){const section=screen==='Alocações'?'allocations':screen==='Disponibilidade'?'availability':screen==='Estrutura acadêmica'?'academic':'slots';const headers=section==='allocations'?['Horário','Matéria','Professor','Turma','Aulas / semana']:section==='availability'?['Professor','Horário disponível']:section==='academic'?['Tipo','Nome','Detalhes']:['Dia','Turno','Início','Duração'];const value=(r:Row,key:string)=>key==='slotId'?`${data.slots.find(s=>s.id===r.slotId)?.dia||'Horário removido'} · ${data.slots.find(s=>s.id===r.slotId)?.inicio||''}`:r[key]||'—';const canEdit=section!=='slots'||role==='ADMIN';return <section className="table-panel"><div className="table-title"><div><h2>{screen==='Alocações'?'Aulas cadastradas':screen==='Disponibilidade'?'Horários disponíveis':screen==='Estrutura acadêmica'?'Cursos, turmas e matérias':'Horários-base'}</h2><p>{screen==='Alocações'?'Escolha o horário, matéria, professor e turma para cada aula.':screen==='Disponibilidade'?'Os professores informam quando podem dar aulas.':screen==='Slots de horário'?'Estes horários são definidos pelo administrador.':'Informações usadas para montar e consultar a grade.'}</p></div>{screen==='Disponibilidade'&&role==='PROFESSOR'&&<button className="btn primary" onClick={onAvailabilityCreate}><Plus size={14}/>Adicionar horário</button>}</div><div className="table-scroll"><table><thead><tr>{headers.map(h=><th key={h}>{h}</th>)}<th/></tr></thead><tbody>{rows.map(row=><tr key={row.id}>{headers.map((h,i)=>{const keys=section==='allocations'?['slotId','materia','professor','turma','aulas']:section==='availability'?['email','slotId']:section==='academic'?['tipo','nome','detalhes']:['dia','turno','inicio','duracao'];let v=value(row,keys[i]);if(section==='availability'&&keys[i]==='email')v=accounts.find(a=>a.email===v)?.name||v;return <td key={h}>{v}</td>})}<td className="row-controls">{canEdit&&role!=='PROFESSOR'&&<button className="icon" title="Editar" onClick={()=>onEdit(row)}><Pencil size={14}/></button>}{section==='availability'&&role==='PROFESSOR'&&<button className="icon" title="Editar" onClick={()=>onEdit(row)}><Pencil size={14}/></button>}{canEdit&&role!=='PROFESSOR'&&<button className="icon danger" title="Remover" onClick={()=>onDelete(row)}><Trash2 size={14}/></button>}{section==='availability'&&role==='PROFESSOR'&&<button className="icon danger" title="Remover" onClick={()=>onDelete(row)}><Trash2 size={14}/></button>}</td></tr>)}</tbody></table></div>{rows.length===0&&<Empty title={emptyHeading(screen)} text={emptyText(screen)}/>}<div className="table-foot">{rows.length} {rows.length===1?'registro':'registros'}<span>{section==='slots'?'Somente o administrador pode alterar estes horários.':''}</span></div></section>}
-
-function Editor({screen,row,data,accounts,role,onClose,onSave}:{screen:Screen;row:Row;data:Data;accounts:Account[];role:Role;onClose:()=>void;onSave:(row:Row)=>void}){const [form,setForm]=useState<Row>(row),[error,setError]=useState('');const change=(key:string,value:string)=>setForm(old=>({...old,[key]:value}));const accountMode=screen==='Usuários';const slotMode=screen==='Slots de horário';const allocation=screen==='Alocações';const availability=screen==='Disponibilidade';const academic=screen==='Estrutura acadêmica';const teacher=role==='PROFESSOR';const slotOptions:[string,string][]=data.slots.map(s=>[s.id,`${s.dia} · ${s.inicio} · ${s.turno}`]);const fields:Field[]=accountMode?[{key:'name',label:'Nome',type:'text'},{key:'email',label:'E-mail',type:'email'},{key:'password',label:'Senha provisória',type:'password'}]:slotMode?[{key:'dia',label:'Dia da semana',type:'select',options:weekDays.map(d=>[d,d])},{key:'turno',label:'Turno',type:'select',options:[['Manhã','Manhã'],['Tarde','Tarde'],['Noite','Noite']]},{key:'inicio',label:'Horário de início',type:'time'},{key:'duracao',label:'Duração (minutos)',type:'number'}]:allocation?[{key:'slotId',label:'Horário',type:'select',options:slotOptions},{key:'materia',label:'Matéria',type:'select',options:data.academic.filter(a=>a.tipo==='Disciplina').map(a=>[a.id,a.nome])},{key:'professor',label:'Professor',type:'select',options:accounts.filter(a=>a.role==='PROFESSOR').map(a=>[a.email,a.name])},{key:'turma',label:'Turma',type:'select',options:data.academic.filter(a=>a.tipo==='Turma').map(a=>[a.id,a.nome])},{key:'aulas',label:'Aulas por semana',type:'number'}]:availability?(teacher?[{key:'slotId',label:'Horário disponível',type:'select',options:slotOptions}]:[{key:'email',label:'Professor',type:'select',options:accounts.filter(a=>a.role==='PROFESSOR').map(a=>[a.email,a.name])},{key:'slotId',label:'Horário disponível',type:'select',options:slotOptions}]):academic?[{key:'tipo',label:'Tipo de cadastro',type:'select',options:[['Curso','Curso'],['Turma','Turma'],['Disciplina','Matéria']]},{key:'nome',label:'Nome',type:'text'},{key:'detalhes',label:'Detalhes',type:'text'}]:[]
- const submit=(e:FormEvent)=>{e.preventDefault();setError('');const missing=fields.some(f=>f.required!==false&&!String(form[f.key]||'').trim());if(missing){setError('Preencha todos os campos.');return}if(slotMode){const from=toMinutes(form.inicio),to=from+Number(form.duracao);if(!Number(form.duracao)||to>1440){setError('Confira o horário e a duração.');return}const clash=data.slots.some(s=>s.id!==form.id&&s.dia===form.dia&&s.turno===form.turno&&from<toMinutes(s.inicio)+Number(s.duracao)&&toMinutes(s.inicio)<to);if(clash){setError('Esse horário se sobrepõe a outro. Ajuste o início ou a duração.');return}}if(accountMode&&accounts.some(a=>a.email.toLowerCase()===form.email.toLowerCase()&&a.id!==form.id)){setError('Já existe um acesso com esse e-mail.');return}const rowOut:Row={...form,id:form.id||id()};if(teacher&&availability)rowOut.email=accounts.find(a=>a.role==='PROFESSOR'&&a.email===row.email)?.email||row.email;onSave(rowOut)}
- const heading=accountMode?'Cadastro de '+labels[row.role as Role].toLowerCase():slotMode?'Novo horário-base':allocation?'Nova aula':availability?'Horário disponível':'Novo cadastro'
- return <div className="backdrop" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><section className="modal"><div className="modal-top"><div><p className="login-overline">{screen==='Alocações'?'AULA':screen==='Disponibilidade'?'DISPONIBILIDADE':'CADASTRO'}</p><h2>{heading}</h2></div><button className="icon" onClick={onClose} aria-label="Fechar"><X size={18}/></button></div><form className="editor-form" onSubmit={submit}>{fields.map(field=><FieldInput key={field.key} field={field} value={form[field.key]||''} onChange={v=>change(field.key,v)}/>)}{error&&<p className="form-error">{error}</p>}<div className="modal-actions"><button type="button" className="btn secondary" onClick={onClose}>Cancelar</button><button className="btn primary"><Check size={15}/>Salvar</button></div></form></section></div>}
-type Field={key:string;label:string;type:string;options?:[string,string][];required?:boolean}
-function FieldInput({field,value,onChange}:{field:Field;value:string;onChange:(value:string)=>void}){return <label>{field.label}{field.type==='select'?<select required={field.required!==false} value={value} onChange={e=>onChange(e.target.value)}><option value="">Selecione</option>{field.options?.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>:<input type={field.type} min={field.type==='number'?1:undefined} required={field.required!==false} value={value} onChange={e=>onChange(e.target.value)} placeholder={field.type==='number'?'Ex.: 4':''}/>}</label>}
-function Empty({title,text}:{title:string;text:string}){return <div className="empty-state"><div><CalendarDays size={21}/></div><strong>{title}</strong><p>{text}</p></div>}
-function toMinutes(value:string){const [h,m]=String(value||'00:00').split(':').map(Number);return h*60+m}
-function emptyHeading(s:Screen){return s==='Alocações'?'Nenhuma aula cadastrada ainda':s==='Disponibilidade'?'Nenhum horário informado ainda':s==='Estrutura acadêmica'?'Sua escola ainda não tem cadastros':s==='Slots de horário'?'Os horários-base ainda não foram definidos':'Nenhum registro encontrado'}
-function emptyText(s:Screen){return s==='Alocações'?'Adicione uma aula escolhendo horário, matéria, professor e turma.':s==='Disponibilidade'?'Adicione os horários em que pode dar aulas.':s==='Estrutura acadêmica'?'Cadastre cursos, turmas e matérias para usar nas aulas.':s==='Slots de horário'?'O administrador pode criar os horários em que as aulas acontecem.':'Adicione um registro para começar.'}
-function screenDescription(s:Screen,role:Role){if(s==='Visão geral')return 'Acompanhe os próximos passos da organização escolar.';if(s==='Horários')return 'Consulte as aulas organizadas por dia e horário.';if(s==='Alocações')return 'Defina o horário, matéria, professor e turma de cada aula.';if(s==='Disponibilidade')return role==='PROFESSOR'?'Informe os dias e horários em que pode dar aulas.':'Consulte os horários disponíveis dos professores.';if(s==='Slots de horário')return 'O administrador define os horários-base das aulas.';if(s==='Usuários')return 'Gerencie quem pode acessar os horários da escola.';return 'Mantenha cursos, turmas e matérias organizados.'}
