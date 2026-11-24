@@ -41,6 +41,9 @@ export default function App() {
   )
   const [generationResult, setGenerationResult] =
     useStoredState<GenerationResult | null>('grade.generation', null)
+  const [adminSetupRequired, setAdminSetupRequired] = useState(
+    () => localStorage.getItem('grade.admin_setup_completed') !== 'true'
+  )
 
   const [screen, setScreen] = useState<Screen>('Horários')
   const [screenHistory, setScreenHistory] = useState<Screen[]>([])
@@ -59,7 +62,8 @@ export default function App() {
 
   const active = session && accounts.find(a => a.id === session.id)
   const role = active?.role
-  const isFirst = !accounts.some(account => account.role === 'ADMIN')
+  const isFirst =
+    adminSetupRequired || !accounts.some(account => account.role === 'ADMIN')
 
   const go = (next: Screen) => {
     if (next !== screen) setScreenHistory(old => [...old, screen])
@@ -78,7 +82,13 @@ export default function App() {
   }
 
   const createAccount = (account: Account) => {
-    setAccounts(old => [...old, account])
+    if (account.role === 'ADMIN') {
+      setAccounts(old => [...old.filter(existing => existing.role !== 'ADMIN'), account])
+      localStorage.setItem('grade.admin_setup_completed', 'true')
+      setAdminSetupRequired(false)
+    } else {
+      setAccounts(old => [...old, account])
+    }
     setSession(account)
     setScreen('Horários')
     notify('Acesso criado. A grade da escola já está disponível.')
@@ -102,10 +112,12 @@ export default function App() {
       'grade.data',
       'grade.session',
       'grade.generation',
+      'grade.admin_setup_completed',
     ].forEach(key => localStorage.removeItem(key))
     setAccounts([])
     setData(emptyData)
     setGenerationResult(null)
+    setAdminSetupRequired(true)
     setSession(null)
     setScreen('Horários')
     setScreenHistory([])

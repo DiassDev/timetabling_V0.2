@@ -23,7 +23,7 @@ export function Login({
   role,
   setRole,
 }: LoginProps) {
-  const [setup, setSetup] = useState(false)
+  const [setup, setSetup] = useState(first)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -39,7 +39,9 @@ export function Login({
     if (setup) {
       if (
         accounts.some(
-          a => a.email.toLowerCase() === email.trim().toLowerCase()
+          a =>
+            a.email.toLowerCase() === email.trim().toLowerCase() &&
+            !(first && a.role === 'ADMIN')
         )
       ) {
         setLocalError('Já existe um acesso com esse e-mail.')
