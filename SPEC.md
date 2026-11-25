@@ -54,3 +54,19 @@ Para executar a interface localmente: `cd frontend`, `npm install` e `npm run de
 - A grade após o acesso mantém a mesma ordem de hooks do React entre a tela de login e as telas internas; o cadastro e a entrada não devem interromper a abertura da grade.
 - A navegação interna permite voltar à tela anterior. Na área de usuários do administrador, a opção **Recomeçar do zero** pede confirmação e apaga acessos e registros guardados neste navegador, retornando ao cadastro inicial do administrador.
 - O servidor tenta iniciar em `http://localhost:5173`. Se essa porta estiver ocupada, ele inicia automaticamente na próxima porta livre e informa o endereço no terminal. Acesse sempre o endereço mostrado pelo Vite; os dados salvos no navegador são separados por endereço. Inicie com `npm run dev` dentro de `frontend`; não use a visualização estática do editor para abrir esta aplicação React.
+### Task - Criar tela de disponibilidade de professores
+
+- A tela **Disponibilidade** mostra uma grade semanal (dias úteis × horários-base) separada por turno (Manhã, Tarde, Noite).
+- O professor clica em cada horário para marcar ou desmarcar a disponibilidade. Também pode marcar ou limpar o turno inteiro. As alterações são salvas na hora e valem só para a própria disponibilidade. Não há escolha de disciplina nem de turma.
+- A coordenação escolhe um professor e consulta a disponibilidade dele, sem poder editar.
+- Sem horários-base cadastrados, a tela pede ao administrador que os cadastre.
+
+
+### Integração do frontend com a API
+
+- Todas as telas (acesso, visão geral, horários, alocações, disponibilidade, estrutura acadêmica, slots e usuários) leem e gravam no banco Django pela API. No navegador fica guardada apenas a sessão de quem entrou.
+- Endpoints usados pelas telas, em `/api/ui/`: `estado/` (todos os dados do período letivo ativo e a última geração), `login/`, `contas/`, `registros/<seção>/` (incluir, editar e remover) e `disponibilidade/` (substitui os horários disponíveis de um professor).
+- A geração usa `/api/execucoes/gerar/` com o período letivo ativo e o usuário que solicitou. O resultado fica salvo no banco e volta a aparecer ao abrir o sistema.
+- O nome exibido de cada usuário vem do e-mail, porque o modelo de dados não tem campo de nome. **Recomeçar do zero** limpa só o navegador; os cadastros no banco são mantidos.
+- Para executar: `.\venv\Scripts\python.exe manage.py runserver` e, em outro terminal, `npm run dev` dentro de `frontend` (o Vite repassa `/api` para a porta 8000).
+

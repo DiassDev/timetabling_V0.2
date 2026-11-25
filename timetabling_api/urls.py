@@ -3,6 +3,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from . import ui
 from .views import (
     AlocacaoViewSet,
     AulaAgendadaViewSet,
@@ -41,5 +42,12 @@ router.register("aulas-agendadas", AulaAgendadaViewSet)
 router.register("diagnosticos", DiagnosticoInviabilidadeViewSet)
 
 urlpatterns = [
+    path("ui/estado/", ui.EstadoView.as_view()),
+    path("ui/login/", ui.LoginView.as_view()),
+    path("ui/contas/", ui.ContasView.as_view()),
+    path("ui/contas/<int:conta_id>/", ui.ContasView.as_view()),
+    path("ui/disponibilidade/", ui.DisponibilidadeProfessorView.as_view()),
+    path("ui/registros/<str:section>/", ui.RegistrosView.as_view()),
+    path("ui/registros/<str:section>/<str:row_id>/", ui.RegistrosView.as_view()),
     path("", include(router.urls)),
 ]

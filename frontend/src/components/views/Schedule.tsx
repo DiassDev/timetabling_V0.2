@@ -29,7 +29,7 @@ export function Schedule({
   onExport,
 }: ScheduleProps) {
   const [turn, setTurn] = useState('Manhã')
-  const [selectedTurma, setSelectedTurma] = useState('Todas')
+  const [selectedTurma, setSelectedTurma] = useState('')
 
   const generatedLessons: ScheduledLesson[] = useMemo(() => {
     if (
@@ -74,20 +74,23 @@ export function Schedule({
   }, [generatedLessons, role, email])
 
   const turmasOptions = useMemo(() => {
-    const fromAcademic = data.academic
-      .filter(a => a.tipo === 'Turma')
-      .map(a => a.nome)
+    const fromAcademic =
+      role === 'PROFESSOR'
+        ? []
+        : data.academic.filter(a => a.tipo === 'Turma').map(a => a.nome)
     const fromLessons = filteredByRole.map(l => l.turma).filter(Boolean)
-    return ['Todas', ...new Set([...fromAcademic, ...fromLessons])]
-  }, [data.academic, filteredByRole])
+    return [...new Set([...fromAcademic, ...fromLessons])]
+  }, [data.academic, filteredByRole, role])
+
+  const activeTurma = turmasOptions.includes(selectedTurma)
+    ? selectedTurma
+    : turmasOptions[0] || ''
 
   const visibleLessons = useMemo(() => {
     return filteredByRole.filter(
-      l =>
-        l.turno === turn &&
-        (selectedTurma === 'Todas' || l.turma === selectedTurma)
+      l => l.turno === turn && (!activeTurma || l.turma === activeTurma)
     )
-  }, [filteredByRole, turn, selectedTurma])
+  }, [filteredByRole, turn, activeTurma])
 
   const activeSlots = data.slots.filter(s => s.turno === turn)
   const defaultTimes =
@@ -116,16 +119,16 @@ export function Schedule({
           <span className="select">
             <CalendarDays size={14} /> Grade semanal
           </span>
-          {turmasOptions.length > 1 && (
+          {turmasOptions.length > 0 && (
             <div className="table-actions">
               <select
                 aria-label="Filtrar por turma"
-                value={selectedTurma}
+                value={activeTurma}
                 onChange={e => setSelectedTurma(e.target.value)}
               >
                 {turmasOptions.map(t => (
                   <option key={t} value={t}>
-                    {t === 'Todas' ? 'Todas as turmas' : t}
+                    {t}
                   </option>
                 ))}
               </select>
@@ -161,11 +164,14 @@ export function Schedule({
       )}
 
       <div className="weekbar">
-        <strong>Horários da semana ({turn})</strong>
+        <strong>
+          Horários da semana ({turn}
+          {activeTurma ? ` · ${activeTurma}` : ''})
+        </strong>
         <span className="legend">
           <i />{' '}
           {concluida
-            ? `Grade otimizada (${filteredByRole.length} aulas)`
+            ? `Grade otimizada (${visibleLessons.length} aulas)`
             : 'Aulas cadastradas'}
         </span>
       </div>

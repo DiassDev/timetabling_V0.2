@@ -9,3 +9,4 @@
 .account-actions{display:flex;gap:7px;align-items:center}.account-actions .btn{white-space:nowrap}@media(max-width:760px){.account-actions{flex-direction:column;align-items:stretch}}
 
 .back-screen{margin-right:7px;color:#5e5dcf}.account-actions{flex-wrap:wrap}.account-actions .btn:first-child{color:#a24d57;border-color:#f0dadd;background:#fffafa}.account-actions .btn:first-child:hover{background:#fff0f1}
+.avail-cell{width:100%;min-height:62px;border:1px dashed #e1e2ea;border-radius:8px;background:#fafafd;color:#a0a3b0;font-size:9px;display:flex;align-items:center;justify-content:center;gap:5px}.avail-cell:hover:not(:disabled){border-color:#aaa9eb;color:#5756c7}.avail-cell.on{border:1px solid #aaa9eb;background:#efefff;color:#5756c7;font-weight:650}.avail-cell:disabled{cursor:default}

@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Login } from './components/auth/Login'
 import { Footer } from './components/layout/Footer'
 import { Header } from './components/layout/Header'
 import { PageHeader } from './components/layout/PageHeader'
 import { Sidebar } from './components/layout/Sidebar'
 import { EditorModal } from './components/modals/EditorModal'
-import { requestScheduleGeneration } from './components/shared/api'
+import { api, toGenerationResult } from './components/shared/api'
+import type { ServerState } from './components/shared/api'
 import { emptyData, labels } from './components/shared/constants'
 import type {
   Account,
@@ -24,26 +25,25 @@ import {
   useStoredState,
 } from './components/shared/utils'
 import { Toast } from './components/ui/Toast'
+import { Availability } from './components/views/Availability'
 import { Dashboard } from './components/views/Dashboard'
 import { RecordsTable } from './components/views/RecordsTable'
 import { Schedule } from './components/views/Schedule'
 import { UsersManagement } from './components/views/UsersManagement'
 
 export default function App() {
-  const [accounts, setAccounts] = useStoredState<Account[]>(
-    'grade.accounts',
-    []
-  )
-  const [data, setData] = useStoredState<Data>('grade.data', emptyData)
+  // Dados vêm do banco via API; apenas a sessão fica guardada no navegador.
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [data, setData] = useState<Data>(emptyData)
+  const [periodoLetivoId, setPeriodoLetivoId] = useState<number | null>(null)
+  const [generationResult, setGenerationResult] =
+    useState<GenerationResult | null>(null)
   const [session, setSession] = useStoredState<Account | null>(
     'grade.session',
     null
   )
-  const [generationResult, setGenerationResult] =
-    useStoredState<GenerationResult | null>('grade.generation', null)
-  const [adminSetupRequired, setAdminSetupRequired] = useState(
-    () => localStorage.getItem('grade.admin_setup_completed') !== 'true'
-  )
+  const [loaded, setLoaded] = useState(false)
+  const [loadError, setLoadError] = useState('')
 
   const [screen, setScreen] = useState<Screen>('Horários')
   const [screenHistory, setScreenHistory] = useState<Screen[]>([])
@@ -60,10 +60,51 @@ export default function App() {
     window.setTimeout(() => setToast(''), 3200)
   }
 
+  const applyState = useCallback((state: ServerState) => {
+    setAccounts(state.accounts)
+    setData({
+      slots: state.slots,
+      academic: state.academic,
+      allocations: state.allocations,
+      availability: state.availability,
+    })
+    setPeriodoLetivoId(state.periodoLetivoId)
+    setGenerationResult(state.generation)
+  }, [])
+
+  const reload = useCallback(async () => {
+    try {
+      applyState(await api.loadState())
+      setLoadError('')
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoaded(true)
+    }
+  }, [applyState])
+
+  useEffect(() => {
+    reload()
+  }, [reload])
+
+  // Executa uma alteração na API e aplica o estado devolvido pelo servidor.
+  const mutate = async (
+    action: () => Promise<ServerState>,
+    success: string
+  ): Promise<boolean> => {
+    try {
+      applyState(await action())
+      if (success) notify(success)
+      return true
+    } catch (err) {
+      notify(err instanceof Error ? err.message : String(err))
+      return false
+    }
+  }
+
   const active = session && accounts.find(a => a.id === session.id)
   const role = active?.role
-  const isFirst =
-    adminSetupRequired || !accounts.some(account => account.role === 'ADMIN')
+  const isFirst = loaded && !loadError && !accounts.some(a => a.role === 'ADMIN')
 
   const go = (next: Screen) => {
     if (next !== screen) setScreenHistory(old => [...old, screen])
@@ -81,17 +122,20 @@ export default function App() {
     setSearch('')
   }
 
-  const createAccount = (account: Account) => {
-    if (account.role === 'ADMIN') {
-      setAccounts(old => [...old.filter(existing => existing.role !== 'ADMIN'), account])
-      localStorage.setItem('grade.admin_setup_completed', 'true')
-      setAdminSetupRequired(false)
-    } else {
-      setAccounts(old => [...old, account])
+  const createAccount = async (account: Account) => {
+    try {
+      const { account: created, state } = await api.createAccount({
+        email: account.email,
+        password: account.password || '',
+        role: account.role,
+      })
+      applyState(state)
+      setSession(created)
+      setScreen('Horários')
+      notify('Acesso criado. A grade da escola já está disponível.')
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : String(err))
     }
-    setSession(account)
-    setScreen('Horários')
-    notify('Acesso criado. A grade da escola já está disponível.')
   }
 
   const logout = () => {
@@ -103,10 +147,9 @@ export default function App() {
   const resetAll = () => {
     if (role !== 'ADMIN') return
     const confirmed = window.confirm(
-      'Isso apagará todos os acessos e todos os horários e cadastros salvos neste navegador. Essa ação não pode ser desfeita. Deseja recomeçar do zero?'
+      'Isso encerrará a sessão e limpará as informações guardadas neste navegador. Os cadastros do banco de dados serão mantidos. Deseja continuar?'
     )
     if (!confirmed) return
-
     ;[
       'grade.accounts',
       'grade.data',
@@ -114,41 +157,20 @@ export default function App() {
       'grade.generation',
       'grade.admin_setup_completed',
     ].forEach(key => localStorage.removeItem(key))
-    setAccounts([])
-    setData(emptyData)
-    setGenerationResult(null)
-    setAdminSetupRequired(true)
     setSession(null)
     setScreen('Horários')
     setScreenHistory([])
     setEditor(null)
     setSearch('')
-    notify('Tudo foi limpo. Cadastre o administrador para começar novamente.')
+    reload()
+    notify('Navegador limpo. Entre novamente para continuar.')
   }
 
-  const saveRow = (section: keyof Data, row: Row) => {
-    setData(old => ({
-      ...old,
-      [section]: old[section].some(x => x.id === row.id)
-        ? old[section].map(x => (x.id === row.id ? row : x))
-        : [...old[section], row],
-    }))
-    setEditor(null)
-    notify('Informações salvas.')
-  }
+  const deleteRow = (section: keyof Data, rowId: string) =>
+    mutate(() => api.deleteRow(section, rowId), 'Registro removido.')
 
-  const deleteRow = (section: keyof Data, rowId: string) => {
-    setData(old => ({
-      ...old,
-      [section]: old[section].filter(x => x.id !== rowId),
-    }))
-    notify('Registro removido.')
-  }
-
-  const deleteAccount = (accountId: string) => {
-    setAccounts(old => old.filter(a => a.id !== accountId))
-    notify('Acesso removido.')
-  }
+  const deleteAccount = (accountId: string) =>
+    mutate(() => api.deleteAccount(accountId), 'Acesso removido.')
 
   const ownAvailability =
     role === 'PROFESSOR'
@@ -166,10 +188,32 @@ export default function App() {
     const term = search.trim().toLowerCase()
     return term
       ? rows.filter(row =>
-          Object.values(row).some(v => v.toLowerCase().includes(term))
+          Object.values(row).some(v => String(v).toLowerCase().includes(term))
         )
       : rows
   }, [screen, data, ownAvailability, search])
+
+  if (!loaded) {
+    return (
+      <div className="app-error">
+        <section>
+          <p>Carregando dados da escola…</p>
+        </section>
+      </div>
+    )
+  }
+
+  if (loadError && !active) {
+    return (
+      <div className="app-error">
+        <section>
+          <h1>Servidor indisponível</h1>
+          <p>{loadError}</p>
+          <button onClick={reload}>Tentar novamente</button>
+        </section>
+      </div>
+    )
+  }
 
   if (!active) {
     return (
@@ -177,35 +221,31 @@ export default function App() {
         first={isFirst}
         accounts={accounts}
         onCreate={createAccount}
-        onLogin={(email, password, wanted) => {
-          const byEmail = accounts.find(
-            a => a.email.toLowerCase() === email.trim().toLowerCase()
-          )
-          const found =
-            byEmail && byEmail.password === password && byEmail.role === wanted
-              ? byEmail
-              : null
-
-          if (found) {
+        onLogin={async (email, password, wanted) => {
+          try {
+            const found = await api.login(email, password, wanted)
             setSession(found)
             setScreen('Horários')
             setLoginError('')
-          } else if (!byEmail && accounts.length === 0) {
-            setLoginError(
-              'Ainda não há acesso cadastrado. Use “Primeiro acesso” para começar.'
-            )
-          } else if (!byEmail) {
-            setLoginError(
-              'Não encontramos esse e-mail. Peça ao administrador para criar seu acesso.'
-            )
-          } else if (byEmail.role !== wanted) {
-            setLoginError(
-              `Este e-mail está cadastrado como ${labels[byEmail.role]}. Escolha esse perfil para entrar.`
-            )
-          } else {
-            setLoginError(
-              'A senha não confere. Tente novamente ou peça ajuda ao administrador.'
-            )
+          } catch (err) {
+            const body = (err as Error & {
+              body?: { motivo?: string; papel?: Role }
+            }).body
+            if (body?.motivo === 'email') {
+              setLoginError(
+                'Não encontramos esse e-mail. Peça ao administrador para criar seu acesso.'
+              )
+            } else if (body?.motivo === 'perfil' && body.papel) {
+              setLoginError(
+                `Este e-mail está cadastrado como ${labels[body.papel]}. Escolha esse perfil para entrar.`
+              )
+            } else if (body?.motivo === 'senha') {
+              setLoginError(
+                'A senha não confere. Tente novamente ou peça ajuda ao administrador.'
+              )
+            } else {
+              setLoginError(err instanceof Error ? err.message : String(err))
+            }
           }
         }}
         error={loginError}
@@ -218,42 +258,30 @@ export default function App() {
   const addAction =
     screen === 'Alocações'
       ? 'Nova alocação'
-      : screen === 'Disponibilidade'
-        ? 'Adicionar horário disponível'
-        : screen === 'Estrutura acadêmica'
-          ? 'Novo cadastro'
-          : screen === 'Slots de horário'
-            ? 'Novo slot'
-            : ''
+      : screen === 'Estrutura acadêmica'
+        ? 'Novo cadastro'
+        : screen === 'Slots de horário'
+          ? 'Novo slot'
+          : ''
 
   const createNew = () => {
     if (screen === 'Slots de horário' && role !== 'ADMIN') {
       notify('Somente o administrador pode alterar os horários-base.')
       return
     }
-    setEditor({ id: id() })
+    setEditor({ id: '' })
   }
 
   const handleGenerateSchedule = async () => {
     if (isGenerating) return
+    if (!periodoLetivoId) {
+      notify('Nenhum período letivo ativo encontrado.')
+      return
+    }
     setIsGenerating(true)
     try {
-      const { result, syncedData } = await requestScheduleGeneration({
-        active,
-        accounts,
-        data,
-      })
-
-      if (syncedData) {
-        setData({
-          slots: syncedData.slots,
-          academic: syncedData.academic,
-          allocations: syncedData.allocations,
-          availability: syncedData.availability,
-        })
-        setAccounts(syncedData.accounts)
-      }
-
+      const body = await api.generate(periodoLetivoId, active.id)
+      const result = toGenerationResult(body, accounts)!
       setGenerationResult(result)
 
       if (result.status === 'CONCLUIDA') {
@@ -264,17 +292,17 @@ export default function App() {
           go('Horários')
         }
       } else {
-        const msg =
+        notify(
           result.diagnosticos[0]?.mensagem ||
-          'Não foi possível gerar a grade com as restrições atuais.'
-        notify(msg)
+            'Não foi possível gerar a grade com as restrições atuais.'
+        )
       }
     } catch (err) {
-      const msg =
+      notify(
         err instanceof Error
           ? err.message
           : 'Erro ao comunicar com o motor de geração.'
-      notify(msg)
+      )
     } finally {
       setIsGenerating(false)
     }
@@ -335,26 +363,26 @@ export default function App() {
     notify('Arquivo de horários baixado.')
   }
 
-  const handleSaveEditor = (row: Row) => {
+  const handleSaveEditor = async (row: Row) => {
     if (screen === 'Usuários') {
       if (
-        accounts.some(
-          a => a.email.toLowerCase() === row.email.toLowerCase()
-        )
+        accounts.some(a => a.email.toLowerCase() === row.email.toLowerCase())
       ) {
         notify('Já existe um acesso com este e-mail.')
         return
       }
-      const account: Account = {
-        id: row.id,
-        name: row.name,
-        email: row.email,
-        password: row.password,
-        role: row.role as Role,
+      try {
+        const { state } = await api.createAccount({
+          email: row.email,
+          password: row.password,
+          role: row.role as Role,
+        })
+        applyState(state)
+        setEditor(null)
+        notify('Acesso criado com sucesso.')
+      } catch (err) {
+        notify(err instanceof Error ? err.message : String(err))
       }
-      setAccounts(old => [...old, account])
-      setEditor(null)
-      notify('Acesso criado com sucesso.')
       return
     }
 
@@ -363,15 +391,6 @@ export default function App() {
 
     if (section === 'slots' && active.role !== 'ADMIN') {
       notify('Somente o administrador pode alterar os horários-base.')
-      return
-    }
-
-    if (
-      section === 'availability' &&
-      active.role === 'PROFESSOR' &&
-      row.email !== active.email
-    ) {
-      notify('Você só pode alterar sua própria disponibilidade.')
       return
     }
 
@@ -394,38 +413,12 @@ export default function App() {
       }
     }
 
-    if (section === 'allocations' && row.slotId) {
-      const duplicate = data.allocations.some(
-        a =>
-          a.id !== row.id &&
-          Boolean(a.slotId) &&
-          a.slotId === row.slotId &&
-          (a.professor === row.professor || a.turma === row.turma)
-      )
-      if (duplicate) {
-        notify(
-          'Esse horário já está ocupado pelo professor ou pela turma.'
-        )
-        return
-      }
-    }
-
-    if (section === 'availability') {
-      const duplicate = data.availability.some(
-        a =>
-          a.id !== row.id &&
-          a.email === row.email &&
-          a.slotId === row.slotId
-      )
-      if (duplicate) {
-        notify(
-          'Esse professor já informou disponibilidade nesse horário.'
-        )
-        return
-      }
-    }
-
-    saveRow(section, row)
+    const isNew = !data[section].some(x => x.id === row.id)
+    const saved = await mutate(
+      () => api.saveRow(section, row, isNew),
+      'Informações salvas.'
+    )
+    if (saved) setEditor(null)
   }
 
   return (
@@ -488,6 +481,20 @@ export default function App() {
               generationResult={generationResult}
               onExport={exportSchedule}
             />
+          ) : screen === 'Disponibilidade' ? (
+            <Availability
+              data={data}
+              accounts={accounts}
+              role={active.role}
+              email={active.email}
+              onChange={availability => {
+                if (active.role !== 'PROFESSOR') return
+                const slotIds = availability
+                  .filter(a => a.email === active.email)
+                  .map(a => a.slotId)
+                mutate(() => api.setAvailability(active.email, slotIds), '')
+              }}
+            />
           ) : screen === 'Usuários' ? (
             <UsersManagement
               accounts={accounts}
@@ -510,7 +517,7 @@ export default function App() {
                 if (section) deleteRow(section, row.id)
               }}
               onAvailabilityCreate={() => {
-                setEditor({ id: id(), email: active.email })
+                setEditor({ id: '', email: active.email })
               }}
             />
           )}
