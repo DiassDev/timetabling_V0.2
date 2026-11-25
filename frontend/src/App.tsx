@@ -265,15 +265,17 @@ export default function App() {
           : ''
 
   const createNew = () => {
-    if (screen === 'Slots de horário' && role !== 'ADMIN') {
-      notify('Somente o administrador pode alterar os horários-base.')
+    if (screen === 'Slots de horário' && role === 'PROFESSOR') {
+      notify(
+        'Somente o administrador e a coordenação podem alterar os horários-base.'
+      )
       return
     }
     setEditor({ id: '' })
   }
 
   const handleGenerateSchedule = async () => {
-    if (isGenerating) return
+    if (isGenerating || role === 'PROFESSOR') return
     if (!periodoLetivoId) {
       notify('Nenhum período letivo ativo encontrado.')
       return
@@ -389,8 +391,10 @@ export default function App() {
     const section = sectionFor(screen)
     if (!section) return
 
-    if (section === 'slots' && active.role !== 'ADMIN') {
-      notify('Somente o administrador pode alterar os horários-base.')
+    if (section === 'slots' && active.role === 'PROFESSOR') {
+      notify(
+        'Somente o administrador e a coordenação podem alterar os horários-base.'
+      )
       return
     }
 

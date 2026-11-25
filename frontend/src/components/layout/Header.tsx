@@ -58,15 +58,17 @@ export function Header({
       </div>
 
       <div className="top-right">
-        <button
-          className="btn primary"
-          onClick={onGenerateSchedule}
-          disabled={isGenerating}
-          title="Executar motor matemático (AG + Simulated Annealing)"
-        >
-          <Sparkles size={14} />
-          {isGenerating ? 'Gerando...' : 'Gerar grade de horários'}
-        </button>
+        {role !== 'PROFESSOR' && (
+          <button
+            className="btn primary"
+            onClick={onGenerateSchedule}
+            disabled={isGenerating}
+            title="Executar motor matemático (AG + Simulated Annealing)"
+          >
+            <Sparkles size={14} />
+            {isGenerating ? 'Gerando...' : 'Gerar grade de horários'}
+          </button>
+        )}
         <label className="search">
           <Search size={15} />
           <input

@@ -70,7 +70,7 @@ export function RecordsTable({
     return r[key] || '—'
   }
 
-  const canEdit = section !== 'slots' || role === 'ADMIN'
+  const canEdit = section !== 'slots' || role !== 'PROFESSOR'
 
   return (
     <section className="table-panel">
@@ -91,7 +91,7 @@ export function RecordsTable({
               : screen === 'Disponibilidade'
                 ? 'Os professores informam quando podem dar aulas.'
                 : screen === 'Slots de horário'
-                  ? 'Estes horários são definidos pelo administrador.'
+                  ? 'Estes horários são definidos pela administração e coordenação.'
                   : 'Informações usadas para montar e consultar a grade.'}
           </p>
         </div>
@@ -183,7 +183,7 @@ export function RecordsTable({
         {rows.length} {rows.length === 1 ? 'registro' : 'registros'}
         <span>
           {section === 'slots'
-            ? 'Somente o administrador pode alterar estes horários.'
+            ? 'Somente a administração e a coordenação podem alterar estes horários.'
             : ''}
         </span>
       </div>

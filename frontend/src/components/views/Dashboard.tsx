@@ -165,14 +165,16 @@ export function Dashboard({
             minimizando janelas vagas.
           </span>
           <div className="actions" style={{ marginTop: 15 }}>
-            <button
-              className="btn primary"
-              onClick={onGenerateSchedule}
-              disabled={isGenerating}
-            >
-              <Sparkles size={15} />
-              {isGenerating ? 'Gerando...' : 'Gerar grade de horários'}
-            </button>
+            {role !== 'PROFESSOR' && (
+              <button
+                className="btn primary"
+                onClick={onGenerateSchedule}
+                disabled={isGenerating}
+              >
+                <Sparkles size={15} />
+                {isGenerating ? 'Gerando...' : 'Gerar grade de horários'}
+              </button>
+            )}
             <button
               className="btn secondary"
               onClick={() =>

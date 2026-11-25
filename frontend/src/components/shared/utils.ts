@@ -63,7 +63,7 @@ export function emptyText(s: Screen) {
       : s === 'Estrutura acadêmica'
         ? 'Cadastre cursos, turmas e matérias para usar nas aulas.'
         : s === 'Slots de horário'
-          ? 'O administrador pode criar os horários em que as aulas acontecem.'
+          ? 'Cadastre os horários em que as aulas acontecem.'
           : 'Adicione um registro para começar.'
 }
 
@@ -83,7 +83,7 @@ export function screenDescription(s: Screen, role: Role) {
       : 'Consulte os horários disponíveis dos professores.'
   }
   if (s === 'Slots de horário') {
-    return 'O administrador define os horários-base das aulas.'
+    return 'Defina os horários-base das aulas por dia e turno.'
   }
   if (s === 'Usuários') {
     return 'Gerencie quem pode acessar os horários da escola.'

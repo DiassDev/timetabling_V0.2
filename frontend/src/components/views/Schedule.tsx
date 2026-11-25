@@ -255,7 +255,11 @@ export function Schedule({
       {filteredByRole.length === 0 && (
         <EmptyState
           title="Sua grade semanal está pronta"
-          text="Clique em “Gerar grade de horários” no topo ou no painel para distribuir as aulas automaticamente."
+          text={
+            role === 'PROFESSOR'
+              ? 'Ainda não há aulas alocadas para o seu perfil na grade semanal.'
+              : 'Clique em “Gerar grade de horários” no topo ou no painel para distribuir as aulas automaticamente.'
+          }
         />
       )}
     </section>

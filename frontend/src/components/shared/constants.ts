@@ -39,6 +39,7 @@ export const screens: Record<Role, Array<[Screen, LucideIcon]>> = {
     ['Alocações', BookOpen],
     ['Disponibilidade', Clock3],
     ['Estrutura acadêmica', GraduationCap],
+    ['Slots de horário', Settings2],
   ],
   PROFESSOR: [
     ['Horários', CalendarDays],

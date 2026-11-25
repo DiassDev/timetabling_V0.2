@@ -10,3 +10,72 @@
 
 .back-screen{margin-right:7px;color:#5e5dcf}.account-actions{flex-wrap:wrap}.account-actions .btn:first-child{color:#a24d57;border-color:#f0dadd;background:#fffafa}.account-actions .btn:first-child:hover{background:#fff0f1}
 .avail-cell{width:100%;min-height:62px;border:1px dashed #e1e2ea;border-radius:8px;background:#fafafd;color:#a0a3b0;font-size:9px;display:flex;align-items:center;justify-content:center;gap:5px}.avail-cell:hover:not(:disabled){border-color:#aaa9eb;color:#5756c7}.avail-cell.on{border:1px solid #aaa9eb;background:#efefff;color:#5756c7;font-weight:650}.avail-cell:disabled{cursor:default}
+
+/* Escala aumentada em ~50% para o painel, grade semanal e tabelas */
+.content{max-width:1750px;padding:38px 46px 24px}
+.eyebrow{font-size:12px}
+h1{font-size:34px}
+.heading p{font-size:15px}
+.btn{height:44px;padding:0 18px;font-size:13.5px;border-radius:9px}
+.stats{gap:18px;margin-bottom:24px}
+.stats article{height:110px;padding:18px;gap:15px;border-radius:12px}
+.stats article>i{width:48px;height:48px;border-radius:11px}
+.stats article>span{font-size:13.5px;gap:6px}
+.stats article strong{font-size:24px}
+.stats article strong small{font-size:13.5px}
+.good,.avatars,.ok{font-size:13px;padding:7px 11px;border-radius:7px}
+.dashboard-grid{gap:18px}
+.welcome-card,.quick-card,.next-card{padding:28px;border-radius:13px}
+.welcome-card{min-height:340px}
+.welcome-art{width:54px;height:54px;border-radius:13px}
+.welcome-card>p{font-size:12px;margin:20px 0 10px}
+.welcome-card h2{max-width:440px;font-size:25px}
+.welcome-card>span{max-width:460px;font-size:14px}
+.quick-card h2{font-size:18px;margin:0 0 12px}
+.quick-item{padding:16px 0;gap:14px}
+.quick-item>i{width:46px;height:46px;border-radius:11px}
+.quick-item strong{font-size:14px}
+.quick-item small{font-size:12.5px}
+.next-card{margin-top:18px;padding:20px 24px}
+.next-card strong,.insight strong{font-size:14px}
+.next-card p,.insight p{font-size:12.5px}
+.next-card button,.insight button{font-size:13px}
+.insight{padding:18px 22px;margin-top:18px;border-radius:12px}
+.toolbar{height:68px;padding:0 22px}
+.select{font-size:13.5px;gap:8px}
+.table-actions select{height:42px;font-size:13px;padding:0 12px}
+.table-actions .btn{height:42px}
+.seg{padding:4px;border-radius:8px;gap:4px}
+.seg button{height:34px;padding:0 14px;font-size:12.5px;border-radius:6px}
+.weekbar{height:60px;padding:0 22px}
+.weekbar>strong{font-size:14px}
+.legend{font-size:12.5px}
+.legend i{width:10px;height:10px;border-radius:3px}
+.grid{min-width:960px;grid-template-columns:105px repeat(5,minmax(165px,1fr))}
+.time-head,.day{height:68px;font-size:12.5px;letter-spacing:.6px}
+.day b{font-size:15px}
+.time{height:112px;gap:6px}
+.time b{font-size:14px}
+.time small{font-size:12px}
+.cell,.schedule .cell{height:auto;min-height:112px;padding:8px}
+.lesson,.schedule .lesson{min-height:94px;padding:11px 12px;border-left-width:3px;border-radius:8px;gap:6px}
+.lesson b{font-size:13.5px}
+.lesson span{font-size:12px}
+.lesson small{font-size:11.5px;gap:5px}
+.avail-cell{min-height:94px;font-size:13.5px;border-radius:10px;gap:7px}
+.schedule-foot{height:54px;padding:0 22px;font-size:12.5px}
+.schedule-foot button{font-size:12.5px}
+.table-title{padding:22px 24px}
+.table-title h2{font-size:17px;margin:0 0 6px}
+.table-title p{font-size:12.5px}
+table{min-width:760px}
+th{height:54px;font-size:11.5px;padding:0 20px}
+td{height:74px;font-size:13.5px;padding:0 20px}
+.row-avatar{width:36px;height:36px;font-size:12px;border-radius:10px;margin-right:12px}
+.badge{font-size:12px;padding:6px 10px;border-radius:7px}
+.table-foot{height:58px;padding:0 22px;font-size:12.5px}
+.table-foot span{font-size:12.5px}
+.empty-state{padding:48px 24px}
+.empty-state>div{width:56px;height:56px;border-radius:14px}
+.empty-state strong{font-size:15px}
+.empty-state p{font-size:13.5px}

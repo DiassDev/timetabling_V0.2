@@ -77,7 +77,7 @@ export function Availability({
       <section className="schedule">
         <EmptyState
           title="Nenhum horário-base cadastrado"
-          text="A disponibilidade é informada sobre os horários-base. Peça ao administrador para cadastrá-los."
+          text="A disponibilidade é informada sobre os horários-base. Peça à coordenação ou ao administrador para cadastrá-los."
         />
       </section>
     )
